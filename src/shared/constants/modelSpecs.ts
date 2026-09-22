@@ -21,6 +21,8 @@ export interface ModelSpec {
   // (upstream returns 400). Used to normalize the request when a combo/route substitutes
   // this model after the client already chose `disabled`. See issue #3554.
   rejectsThinkingDisabled?: boolean;
+  // Adaptive-only models may also reject forced tool selection.
+  rejectsForcedToolChoice?: boolean;
   // Model ONLY supports adaptive thinking: manual extended thinking was removed. Sending
   // `thinking.type:"enabled"` or any `thinking.budget_tokens` returns HTTP 400; reasoning
   // is steered exclusively by `output_config.effort` (low/medium/high/xhigh/max). True for
@@ -380,6 +382,21 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
     // …and, like Opus 4.7+, rejects manual budgets/`type:"enabled"` (adaptive-only).
     adaptiveThinkingOnly: true,
     aliases: BEDROCK_CLAUDE_ALIASES("claude-fable-5"),
+  },
+
+  // ── Claude Opus 5.5 ─────────────────────────────────────────────
+  "claude-opus-5-5": {
+    maxOutputTokens: 128000,
+    contextWindow: 1000000,
+    defaultThinkingBudget: 32000,
+    thinkingBudgetCap: 120000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    rejectsThinkingDisabled: true,
+    adaptiveThinkingOnly: true,
+    rejectsForcedToolChoice: true,
+    aliases: BEDROCK_CLAUDE_ALIASES("claude-opus-5-5", "claude-opus-5.5"),
   },
 
   // ── Claude Opus 5 ───────────────────────────────────────────────
@@ -812,9 +829,39 @@ export function normalizeThinkingForModel<T extends Record<string, unknown>>(
     getModelSpec(modelId)?.rejectsThinkingDisabled
   ) {
     const { thinking: _omitted, ...rest } = body as Record<string, unknown>;
-    return rest as T;
+    return normalizeForcedToolChoiceForModel(rest as T, modelId);
   }
-  return body;
+  return normalizeForcedToolChoiceForModel(body, modelId);
+}
+
+/**
+ * Normalize tool-choice constraints that a resolved model cannot accept.
+ *
+ * Claude Opus 5.5 always uses adaptive thinking and rejects tool choices that force
+ * either any tool or one named tool. Preserve the declared tools and every unrelated
+ * request field, but drop the choice to select the default `auto` behavior so routing a
+ * request to Opus 5.5 does not turn a recoverable preference into an upstream 400.
+ */
+export function normalizeForcedToolChoiceForModel<T extends Record<string, unknown>>(
+  body: T,
+  modelId: string
+): T {
+  if (!getModelSpec(modelId)?.rejectsForcedToolChoice) return body;
+
+  const toolChoice = body.tool_choice;
+  const forced =
+    toolChoice === "required" ||
+    toolChoice === "any" ||
+    (toolChoice !== null &&
+      typeof toolChoice === "object" &&
+      !Array.isArray(toolChoice) &&
+      ["any", "tool", "function"].includes(
+        String((toolChoice as Record<string, unknown>).type || "").toLowerCase()
+      ));
+  if (!forced) return body;
+
+  const { tool_choice: _omitted, ...rest } = body;
+  return rest as T;
 }
 
 export function capMaxOutputTokens(modelId: string, requested?: number): number | undefined {

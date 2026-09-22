@@ -1,0 +1,60 @@
+name: Opus 5.5 backport image
+
+on:
+  push:
+    branches: [codex/backport-opus-5-5-v3.8.50]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: opus55-backport-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    if: github.repository == 'razakiau/OmniRoute'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm rebuild better-sqlite3
+      - run: node scripts/test/opus55-backport.mjs
+      - run: npm run typecheck:core
+
+  image:
+    needs: test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: runner-base
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/razakiau/omniroute:3.8.50-opus55-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/razakiau/OmniRoute
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=3.8.50-opus55
+          cache-from: type=gha,scope=opus55-backport
+          cache-to: type=gha,mode=max,scope=opus55-backport
