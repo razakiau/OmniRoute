@@ -2,6 +2,10 @@
 import { spawnSync } from "node:child_process";
 
 const suites = [
+  "opencode-go-current-responses",
+  "opencode-target-format-alias-11045",
+  "opencode-session-fingerprint-headers-10571",
+  "opencode-cli-headers-synthesis-5997",
   "claude-opus-5-5",
   "claude-codex-identity-version-sync",
   "claude-identity-version-sync",

@@ -14,6 +14,27 @@ export const opencode_goProvider: RegistryEntry = {
   authPrefix: "Bearer",
   defaultContextLength: 200000,
   models: [
+    // ZAC-106, 2026-09-28: the current Go catalog discovers these IDs, but
+    // discovery supplies no protocol. Official Go docs require /responses;
+    // using the provider's Chat default returned upstream HTTP 400 for both.
+    {
+      id: "gpt-6-luna",
+      name: "GPT 6 Luna",
+      contextLength: 1050000,
+      maxOutputTokens: 128000,
+      supportsReasoning: true,
+      supportsVision: true,
+      targetFormat: "openai-responses",
+    },
+    {
+      id: "grok-4.7",
+      name: "Grok 4.7",
+      contextLength: 500000,
+      maxOutputTokens: 500000,
+      supportsReasoning: true,
+      supportsVision: true,
+      targetFormat: "openai-responses",
+    },
     // Port from decolua/9router 8efacc11: align with official Go endpoints —
     // glm-5.2 is now advertised and Kimi chat traffic must route through
     // `kimi-k2.7-code` (the live API rejects the plain `kimi-k2.7` alias for
