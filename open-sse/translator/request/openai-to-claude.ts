@@ -39,6 +39,30 @@ export const CLAUDE_OAUTH_TOOL_PREFIX = "proxy_";
 const CLAUDE_TOOL_CHOICE_REQUIRED = "an" + "y";
 const COPILOT_REASONING_SUMMARY_MARKER = "_omnirouteCopilotReasoningSummary";
 
+// ZAC-193: signed-thinking replay (claudeThinkingStore + restoreClaudeThinkingBlocks)
+// restores Anthropic's exact signed `thinking` blocks before the owning tool_use so a
+// Claude model keeps its own reasoning continuity across tool-loop turns for OpenAI-shaped
+// clients (which only ever receive the reasoning TEXT, never the signatures). The store is
+// MEMORY-ONLY (claudeThinkingStore.ts: `new Map`, 1h TTL, signatures deliberately never hit
+// disk/logs). That makes it fragile: a gateway restart/redeploy OR a >1h pause wipes it, the
+// restore misses, AND the in-process signature-recovery (downgradeRestoredClaudeThinking)
+// can't help either since it reads the same wiped Map. Anthropic then rejects the turn with
+// 400 "`thinking`/`redacted_thinking` blocks in the latest assistant message cannot be
+// modified" — and the poisoned turn is baked into the client transcript forever (permanent
+// retry-loop). This hit the homelab: redeploying OmniRoute under three live opus-5-5 sessions
+// killed all three at once. Pre-3.8.52 (the homelab's prior image) had no replay at all and
+// was restart-immune by always using the #5312 redacted_thinking placeholder.
+//
+// Switch (default OFF = restart-immune placeholder behaviour, matches the prior image). Flip
+// OMNIROUTE_CLAUDE_SIGNED_THINKING_REPLAY=true to re-enable signed replay once the store is
+// made durable across restarts (tracked separately). Read fresh per request so the admin can
+// toggle it without a rebuild.
+function claudeSignedThinkingReplayEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = env.OMNIROUTE_CLAUDE_SIGNED_THINKING_REPLAY;
+  if (typeof raw !== "string") return false;
+  return ["true", "1", "yes", "on"].includes(raw.trim().toLowerCase());
+}
+
 function wantsCopilotSummarizedThinking(body: Record<string, unknown> | null | undefined): boolean {
   return body?.[COPILOT_REASONING_SUMMARY_MARKER] === "summarized";
 }
@@ -785,6 +809,7 @@ function getContentBlocksFromMessage(
     if (
       !isKimiCoding &&
       !thinkingBinding.disabled &&
+      claudeSignedThinkingReplayEnabled() &&
       thinkingEnabledForRequest &&
       hasToolUseBlock &&
       !hasThinkingBlock
