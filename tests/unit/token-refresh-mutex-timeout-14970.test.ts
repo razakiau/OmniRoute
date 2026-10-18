@@ -24,6 +24,11 @@ import {
 const silentLog = { info() {}, warn() {}, error() {} };
 const MUTEX_MS = 150;
 
+// The bound timers are unref()'d (a server keeps the loop alive in production).
+// Run alone, nothing else is ref'd, so node:test would end the file mid-wait.
+const keepAlive = setInterval(() => {}, 1000);
+test.after(() => clearInterval(keepAlive));
+
 function withFetch<T>(impl: () => Promise<Response>, fn: () => Promise<T>): Promise<T> {
   const realFetch = globalThis.fetch;
   globalThis.fetch = impl as never;
