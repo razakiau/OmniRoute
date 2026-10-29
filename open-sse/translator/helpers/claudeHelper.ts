@@ -457,8 +457,11 @@ export function prepareClaudeRequest(
   // 1. System: remove all cache_control, add only to the last block with the provider TTL
   // In passthrough mode, preserve existing cache_control markers
   const isVertexClaudeProvider = provider === "vertex" || provider === "vertex-partner";
+  // "anthropic" is the API-key connection to the same Messages API as "claude"
+  // (OAuth); without it every translated request ships zero cache breakpoints.
   const supportsPromptCaching =
     provider === "claude" ||
+    provider === "anthropic" ||
     isVertexClaudeProvider ||
     provider?.startsWith?.("anthropic-compatible-");
   // Vertex's documented default is a five-minute ephemeral cache. Omitting ttl is
