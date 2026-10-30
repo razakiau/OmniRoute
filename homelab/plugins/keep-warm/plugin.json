@@ -1,0 +1,22 @@
+{
+  "name": "keep-warm",
+  "version": "1.0.0",
+  "description": "Keeps a big Copilot chat's prompt cache warm while it waits for its owner: replays the chat's last request with max_tokens 1 just before the 1 h cache expires, so the next real call reads the context instead of storing it again (ZAC-260).",
+  "author": "local",
+  "license": "MIT",
+  "main": "index.mjs",
+  "source": "local",
+  "tags": ["cache", "claude", "cost"],
+  "hooks": {
+    "onRequest": true,
+    "onResponse": true,
+    "onError": false,
+    "onStreamComplete": true,
+    "onActivate": true,
+    "onDeactivate": true
+  },
+  "requires": {
+    "permissions": ["network", "file-read", "file-write"]
+  },
+  "enabledByDefault": true
+}

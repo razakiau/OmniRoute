@@ -1,0 +1,15 @@
+{
+  "allowKeys": ["my-copilot-key"],
+  "idleMin": 55,
+  "windowHours": 8,
+  "fusePerDay": 200,
+  "thresholdUsd": 1,
+  "maxKeys": 200,
+  "maxBytes": 524288000,
+  "baseUrl": "http://127.0.0.1:20128",
+  "prices": {
+    "claude-opus-5-5": { "input": 4, "output": 20, "cached": 0.2 },
+    "claude-sonnet-5-5": { "input": 2, "output": 10, "cached": 0.2 },
+    "claude-haiku-5-5": { "input": 1, "output": 5, "cached": 0.1 }
+  }
+}

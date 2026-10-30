@@ -1,0 +1,19 @@
+{
+  "name": "tool-call-args-fix",
+  "version": "1.0.0",
+  "description": "Sends a tool call with no arguments as {} instead of \"\", so replaying it to Claude does not 400 with 'tool_use.input: Input should be an object' (ZAC-94).",
+  "author": "local",
+  "license": "MIT",
+  "main": "index.mjs",
+  "source": "local",
+  "tags": ["translation", "claude", "tools", "fix"],
+  "hooks": {
+    "onRequest": true,
+    "onResponse": false,
+    "onError": false
+  },
+  "requires": {
+    "permissions": []
+  },
+  "enabledByDefault": true
+}
