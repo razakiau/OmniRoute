@@ -36,7 +36,8 @@
  *
  * State and settings live in the plugin's own OmniRoute config
  * (/api/plugins/keep-warm/config): `settings` is written by Ovis (switch,
- * window, fuse, per-chat opt-out), `state` by this plugin. Plugins cannot
+ * window, fuse, per-chat opt-out, per-chat window `extend: {key: {from, until}}`),
+ * `state` by this plugin. Plugins cannot
  * register routes (loader.ts), and the config API is the one surface both
  * sides can reach: the plugin over loopback with the container's CLI token,
  * Ovis (CT 208, private LAN) with its access tokens.
@@ -57,6 +58,8 @@ export const MARKER = "x-omniroute-keepwarm";
 export const DEBUG_HEADER = "x-omniroute-keepwarm-debug";
 const MIN = 60_000;
 const HOUR = 60 * MIN;
+/** An extension never keeps a chat warm past this long after its last real call. */
+export const EXTEND_MAX_HOURS = 48;
 
 /** Defaults; config.json (Ansible) overrides them, Ovis' settings override the switch/window/fuse. */
 export const DEFAULTS = Object.freeze({
@@ -255,6 +258,10 @@ export function createKeepWarm({
     if (num(s.windowHours) > 0) c.windowHours = Math.min(24, s.windowHours);
     if (num(s.fusePerDay) > 0) c.fusePerDay = Math.min(1000, Math.floor(s.fusePerDay));
     c.disabled = new Set(Array.isArray(s.disabled) ? s.disabled.filter((k) => typeof k === "string") : []);
+    // Per-chat overrides of the window, from Ovis' window-end alert: {key: {from, until}}. `from`
+    // is the real call it was set for, so the next real call drops it (a new window starts).
+    c.extend = new Map(s.extend && typeof s.extend === "object"
+      ? Object.entries(s.extend).filter(([, v]) => v && num(v.from) && num(v.until)) : []);
     return c;
   };
 
@@ -281,9 +288,8 @@ export function createKeepWarm({
 
   function evict() {
     const c = opts();
-    const windowMs = c.windowHours * HOUR;
     for (const [k, e] of index) {
-      if (now() - e.lastRealAt > windowMs + HOUR) drop(k);
+      if (now() - untilOf(e, c) > HOUR) drop(k);
     }
     let bytes = [...index.values()].reduce((s, e) => s + num(e.bytes), 0);
     const oldest = [...index.values()].sort((a, b) => a.lastRealAt - b.lastRealAt);
@@ -378,11 +384,21 @@ export function createKeepWarm({
     } catch {}
   };
 
+  /**
+   * When keep-warm stops for `e`: windowHours after its last real call, unless the owner set it
+   * for that call (later: "Keep 8 h more"; now: "Let it cool"), capped at EXTEND_MAX_HOURS.
+   */
+  function untilOf(e, c = opts()) {
+    const o = c.extend.get(e.key);
+    if (o && o.from === e.lastRealAt) return Math.min(Math.max(o.until, e.lastRealAt), e.lastRealAt + EXTEND_MAX_HOURS * HOUR);
+    return e.lastRealAt + c.windowHours * HOUR;
+  }
+
   /** Whether `e` is kept warm now, and when its next ping is due. */
   function plan(e, c = opts()) {
     const t = now();
     const touch = Math.max(e.lastRealAt, e.lastPingAt || 0);
-    const until = e.lastRealAt + c.windowHours * HOUR;
+    const until = untilOf(e, c);
     const big = restartUsd(e) >= c.thresholdUsd;
     const kept = c.enabled && !c.disabled.has(e.key) && !e.missed && big && t < until && !!priceOf(e.model);
     const due = touch + c.idleMin * MIN;

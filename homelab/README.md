@@ -95,6 +95,11 @@ Runtime switches (on/off, window hours, daily fuse, chats to skip) live in
 the plugin's OmniRoute config under `settings`:
 `PUT /api/plugins/keep-warm/config` with
 `{"config": {"settings": {"enabled": true, "windowHours": 8, "fusePerDay": 200, "disabled": []}}}`.
+A PUT replaces the whole config, so send `state` back as you read it.
+One chat can get its own window with
+`"extend": {"<chat key>": {"from": <its lastRealAt>, "until": <ms>}}`: it
+applies until that chat's next real call, at most 48 h after it (set
+`until` to now to stop pinging it).
 The plugin writes its live state (chats, pings today, cost) under `state`
 in the same config; `GET` it to see what it does. It re-reads `config.json`
 every 30 s, so editing it needs no reload.

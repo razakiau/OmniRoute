@@ -268,6 +268,35 @@ t("Ovis' window and fuse are honoured", async () => {
   assert.equal(h.sent.length, 2); // 55 and 110 min; 165 is past 2 h
   assert.equal(h.kw.state().fusePerDay, 50);
 });
+t("a per-chat window (Ovis' window-end alert): longer, shorter, capped, dropped by the next real call", async () => {
+  const k = conversationKey("mac-cli", body());
+  const h = harness({ settings: { windowHours: 2 } });
+  h.real();
+  h.kw.setSettings({ windowHours: 2, extend: { [k]: { from: T0, until: T0 + 4 * HOUR } } });
+  assert.equal(h.kw.state().keys[0].until, T0 + 4 * HOUR);
+  for (let i = 0; i < 6 * 60; i++) { h.advance(MIN); await h.kw.tick(); }
+  assert.equal(h.sent.length, 4); // 55, 110, 165, 220 min; 275 is past 4 h
+
+  const far = harness({ settings: { windowHours: 2, extend: { [k]: { from: T0, until: T0 + 100 * HOUR } } } });
+  far.real();
+  assert.equal(far.kw.state().keys[0].until, T0 + 48 * HOUR);
+
+  // "Let it cool": until now, so no more pings
+  const cool = harness({ settings: { windowHours: 8, extend: { [k]: { from: T0, until: T0 + 30 * MIN } } } });
+  cool.real();
+  cool.advance(56 * MIN);
+  assert.equal(await cool.kw.tick(), 0);
+  assert.equal(cool.kw.state().keys[0].kept, false);
+
+  // set for an older call: the new call's own window applies
+  const stale = harness({ settings: { windowHours: 2, extend: { [k]: { from: T0 - HOUR, until: T0 + 30 * MIN } } } });
+  stale.real();
+  assert.equal(stale.kw.state().keys[0].until, T0 + 2 * HOUR);
+  // another chat's override changes nothing for this one
+  const other = harness({ settings: { windowHours: 2, extend: { nope: { from: T0, until: T0 + 10 * HOUR } } } });
+  other.real();
+  assert.equal(other.kw.state().keys[0].until, T0 + 2 * HOUR);
+});
 t("one ping at a time", async () => {
   const h = harness();
   h.real(); h.real(body({ first: "b" }));
