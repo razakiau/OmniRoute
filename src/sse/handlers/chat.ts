@@ -85,6 +85,7 @@ import { dispatchChatWithAffinityEviction } from "./chatDispatch";
 import { getCachedSettings, getCombosCacheVersion } from "@/lib/db/readCache";
 import { comboCheckProvider, ghComboGate } from "./chat/githubLiveCatalogFilter.ts";
 import { markEmergencyFallback } from "./emergencyFallbackHeader.ts";
+import { pinnedKeepWarmConnection } from "./chat/keepWarmPin.ts";
 import { resolveEmergencyFallbackDecision } from "./emergencyFallbackHeader.ts";
 import { evaluateComboTargetPreflight } from "./chat/comboTargetKeyPolicy.ts";
 import * as resolvedPolicy from "./chat/resolvedModelPolicy.ts";
@@ -770,6 +771,8 @@ async function handleChatImplementation(
   const sessionId = externalSessionId || generateStableSessionId(body);
   const sessionAffinityKey = extractSessionAffinityKey(body, request.headers) || sessionId;
   const requestedConnectionId = request.headers.get("x-omniroute-connection")?.trim() || null;
+  // Homelab (ZAC-267): a keep-warm ping pinned to the account that holds the chat's cache.
+  const keepWarmPin = pinnedKeepWarmConnection(request.headers);
   if (sessionId) {
     touchSession(sessionId);
   }
@@ -1099,8 +1102,10 @@ async function handleChatImplementation(
 
   // Check if model is a combo (has multiple models with fallback)
   telemetry.startPhase("resolve");
-  let combo: any = await getComboForModel(resolvedModelStr);
-  if (reasoningDecision?.targetCombo) combo = reasoningDecision.targetCombo;
+  // A pinned keep-warm ping goes straight to its account: a combo would fail over on the
+  // ping's empty (thinking-only) answer and log a 502 for a ping that already read the cache.
+  let combo: any = keepWarmPin ? null : await getComboForModel(resolvedModelStr);
+  if (reasoningDecision?.targetCombo && !keepWarmPin) combo = reasoningDecision.targetCombo;
 
   // "auto" prefix fuzzy matching: "auto/fast" → "auto/best-fast", etc.
   // parseModel splits "auto/fast" into provider="auto" which isn't a real provider.
@@ -1476,6 +1481,7 @@ async function handleChatImplementation(
       sessionAffinityKey,
       forceLiveComboTest: isComboLiveTest,
       forcedConnectionId: requestedConnectionId,
+      ...(keepWarmPin ? { strictForcedConnection: true, emergencyFallbackTried: true } : {}),
       correlationId: reqId,
       conversationId,
       routingComboId,
@@ -1518,6 +1524,7 @@ async function handleSingleModelChat(
     sessionId?: string | null;
     sessionAffinityKey?: string | null;
     forcedConnectionId?: string | null;
+    strictForcedConnection?: boolean;
     allowedConnectionIds?: string[] | null;
     comboStepId?: string | null;
     comboExecutionKey?: string | null;
@@ -1818,6 +1825,7 @@ async function handleSingleModelChat(
                 requireToolCalling: hasQoderCallerTools(body),
                 sessionKey: occupancySessionKey,
                 reserveOAuthSession: true,
+                ...(runtimeOptions.strictForcedConnection ? { strictForcedConnection: true } : {}),
                 excludeConnectionIds: Array.from(excludedConnectionIds),
                 ...(agy.on
                   ? { reserveAntigravityLease: true, routingRequestId: agy.requestId }

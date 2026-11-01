@@ -236,6 +236,8 @@ export interface PluginContext {
    *  observability/trace-export plugins can read request-scoped context sent by the
    *  client (trace ids, correlation ids, session markers). */
   headers?: Record<string, string | string[] | undefined>;
+  /** Homelab (ZAC-267): on onResponse, the connection that answered. */
+  connectionId?: string;
   metadata: Record<string, unknown>;
 }
 
@@ -283,6 +285,8 @@ export type PluginOnStreamCompletePayload = {
   };
   model?: string;
   provider?: string;
+  /** Homelab (ZAC-267): the connection that answered. */
+  connectionId?: string;
   errorCode?: string;
 };
 
