@@ -168,6 +168,7 @@ import {
   planSessionAffinityConnection,
   syncSessionAffinityRuntimeFields,
 } from "./sessionAffinityPin";
+import { narrowToFirstTier } from "./claudeRoleTiers.ts";
 import {
   EXPLICIT_INACTIVE_PROBE_INTERVAL_MS,
   lastExplicitProbeTime,
@@ -1816,9 +1817,13 @@ export async function getProviderCredentials(
       };
     }
 
+    const tieredCandidates =
+      options.connectionTiers && options.connectionTiers.length > 0
+        ? narrowToFirstTier(withQuota, options.connectionTiers)
+        : withQuota;
     const policyValidLeaseCandidates = options._leaseCandidateIds
-      ? withQuota.filter((candidate) => options._leaseCandidateIds!.includes(candidate.id))
-      : withQuota;
+      ? tieredCandidates.filter((candidate) => options._leaseCandidateIds!.includes(candidate.id))
+      : tieredCandidates;
     if (policyValidLeaseCandidates.length === 0) return null;
     const leasePolicy = await applyExclusiveConnectionLeasePolicy(
       policyValidLeaseCandidates,
@@ -2056,7 +2061,13 @@ export async function getProviderCredentials(
       connection = orderedConnections[0];
     }
 
-    if (options.reserveOAuthSession === true && connection?.authType === "oauth") {
+    // ZAC-263: with tiers the spill would move a chat to a less busy account and
+    // rewrite its whole cache there; the tier already decided the account set.
+    if (
+      options.reserveOAuthSession === true &&
+      connection?.authType === "oauth" &&
+      !(options.connectionTiers && options.connectionTiers.length > 0)
+    ) {
       const selectedPriority = connection.priority || 999;
       const selectedAvailability = getOAuthSessionAvailability(connection.id, options.sessionKey);
       const moreAvailablePeer = [...orderedConnections]

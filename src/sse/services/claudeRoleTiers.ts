@@ -79,3 +79,15 @@ export function narrowToFirstTier<T extends { id: string }>(candidates: T[], tie
   const listed = new Set(tiers.flat());
   return candidates.filter((candidate) => !listed.has(candidate.id));
 }
+
+const DEFAULT_ROLE_AFFINITY_TTL_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * How long a tiered Claude conversation stays on the account it started on
+ * (OMNIROUTE_CLAUDE_ROLE_AFFINITY_TTL_MS, default 2 h: a sub-agent or a gap in a
+ * main chat rarely exceeds it, and the 1 h cache is gone by then anyway).
+ */
+export function claudeRoleAffinityTtlMs(raw = process.env.OMNIROUTE_CLAUDE_ROLE_AFFINITY_TTL_MS): number {
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : DEFAULT_ROLE_AFFINITY_TTL_MS;
+}

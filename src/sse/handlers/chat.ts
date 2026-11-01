@@ -86,6 +86,7 @@ import { getCachedSettings, getCombosCacheVersion } from "@/lib/db/readCache";
 import { comboCheckProvider, ghComboGate } from "./chat/githubLiveCatalogFilter.ts";
 import { markEmergencyFallback } from "./emergencyFallbackHeader.ts";
 import { pinnedKeepWarmConnection } from "./chat/keepWarmPin.ts";
+import { claudeRoleAffinityTtlMs, tiersForRequest } from "../services/claudeRoleTiers.ts";
 import { resolveEmergencyFallbackDecision } from "./emergencyFallbackHeader.ts";
 import { evaluateComboTargetPreflight } from "./chat/comboTargetKeyPolicy.ts";
 import * as resolvedPolicy from "./chat/resolvedModelPolicy.ts";
@@ -1798,6 +1799,12 @@ async function handleSingleModelChat(
   const sameAccountTransportRetries = new Map<string, number>();
   const occupancySessionKey =
     runtimeOptions.sessionAffinityKey ?? runtimeOptions.sessionId ?? `request:${randomUUID()}`;
+  // Homelab (ZAC-263): main chats and sub-agents on separate Claude account tiers.
+  // A forced connection (combo pin, keep-warm ping) already names its account.
+  const connectionTiers =
+    hasForcedConnection || runtimeOptions.strictForcedConnection
+      ? null
+      : tiersForRequest(provider, body);
   let initialPreselectedCredentials = runtimeOptions.preselectedCredentials;
   // ANTIGRAVITY_ACCOUNT_LEASE_ENABLED (#10011 re-land): off ⇒ every `agy.*` branch is inert
   // and selection/dispatch behave exactly as before. `attempted` survives a loop restart.
@@ -1825,6 +1832,9 @@ async function handleSingleModelChat(
                 requireToolCalling: hasQoderCallerTools(body),
                 sessionKey: occupancySessionKey,
                 reserveOAuthSession: true,
+                ...(connectionTiers
+                  ? { connectionTiers, sessionAffinityTtlMs: claudeRoleAffinityTtlMs() }
+                  : {}),
                 ...(runtimeOptions.strictForcedConnection ? { strictForcedConnection: true } : {}),
                 excludeConnectionIds: Array.from(excludedConnectionIds),
                 ...(agy.on
