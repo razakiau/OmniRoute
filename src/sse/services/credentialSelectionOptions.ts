@@ -10,6 +10,11 @@ export interface CredentialSelectionOptions {
   allowRateLimitedConnections?: boolean;
   bypassQuotaPolicy?: boolean;
   forcedConnectionId?: string | null;
+  /**
+   * Homelab (ZAC-267): keep-warm ping. The forced connection or none: no sibling
+   * fallback, no session-affinity override, no reviving an inactive connection.
+   */
+  strictForcedConnection?: boolean;
   excludeConnectionIds?: string[] | null;
   sessionKey?: string | null;
   sessionAffinityTtlMs?: number | null;

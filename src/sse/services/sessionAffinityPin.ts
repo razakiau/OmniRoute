@@ -600,3 +600,19 @@ export function isForcedConnectionMissingFromPool(
     !connections.some((conn) => conn.id === forcedConnectionId)
   );
 }
+
+/**
+ * Homelab (ZAC-267): a keep-warm ping's pin is strict. Only the pinned account
+ * holds the chat's prompt cache; any sibling would write the whole prompt from
+ * scratch, so an unusable pinned account (missing from the pool, excluded,
+ * cooling, quota-blocked) yields no account at all instead of degrading to the
+ * rest of the pool.
+ */
+export function strictForcedConnectionPool<T extends AffinityPinConnection>(
+  params: Omit<ResolveForcedConnectionForPoolParams, "connections"> & { connections: T[] }
+): T[] {
+  const forced = params.forcedConnectionId?.trim() || null;
+  if (!forced || !params.connections.some((conn) => conn.id === forced)) return [];
+  const kept = resolveForcedConnectionForCredentialPool(params);
+  return kept === forced ? params.connections.filter((conn) => conn.id === forced) : [];
+}
