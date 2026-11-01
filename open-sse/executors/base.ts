@@ -65,6 +65,7 @@ import type { ProviderRequestDefaults } from "../services/providerRequestDefault
 import { signRequestBody } from "../services/claudeCodeCCH.ts";
 import { normalizeCacheControlTtl } from "../services/claudeCodeConstraints.ts";
 import { placeStablePrefixBreakpoints } from "../services/claudeStablePrefix.ts";
+import { applySessionContextFreeze } from "../services/claudeSessionContextFreeze.ts";
 import {
   appendAnthropicBetaHeader,
   CLAUDE_CODE_COMPATIBLE_REDACT_THINKING_BETA,
@@ -1294,6 +1295,10 @@ export class BaseExecutor {
               );
             }
           }
+
+          // ZAC-272 (homelab): replay this chat's first <session_context> block until its
+          // next compaction. Before the breakpoints, which split the text at that block.
+          applySessionContextFreeze(tb);
 
           // ZAC-263 (homelab): breakpoints before the client's cwd and session lines, so a
           // new chat reads the shared prompt start back. Last thing to touch markers.
