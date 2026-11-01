@@ -68,7 +68,7 @@ describe("computeCCH", () => {
 
 describe("signRequestBody", () => {
   it("replaces cch=00000 placeholder with computed hash", async () => {
-    const body = `{"x-anthropic-billing-header":"cc_version=${CLAUDE_CODE_COMPATIBLE_VERSION}.abc; cch=00000;","model":"claude"}`;
+    const body = `{"model":"claude","system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=${CLAUDE_CODE_COMPATIBLE_VERSION}.abc; cch=00000;"}]}`;
     const signed = await signRequestBody(body);
     assert.ok(signed.includes("cch="), "signed body should contain cch=");
     assert.ok(!signed.includes("cch=00000"), "placeholder cch=00000 should be replaced");
