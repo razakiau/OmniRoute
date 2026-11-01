@@ -51,6 +51,10 @@ jobs:
           target: runner-base
           platforms: linux/amd64
           push: true
+          # ZAC-263: next build OOMed 3x at the Dockerfile's 6144 MB when base.ts
+          # changed (cache-cold webpack pass); the runner has 16 GB.
+          build-args: |
+            OMNIROUTE_BUILD_MEMORY_MB=10240
           tags: ghcr.io/razakiau/omniroute:3.8.52-homelab-${{ github.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/razakiau/OmniRoute
