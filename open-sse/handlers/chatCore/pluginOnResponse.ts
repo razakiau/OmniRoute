@@ -25,6 +25,8 @@ export async function runPluginOnResponseHook(args: {
   provider: string | null | undefined;
   apiKeyInfo: unknown;
   headers?: Record<string, string | string[] | undefined>;
+  /** Homelab (ZAC-267): the connection that answered, so keep-warm can ping the same account. */
+  connectionId?: string | null;
   response: PluginOnResponsePayload;
 }): Promise<void> {
   try {
@@ -37,6 +39,7 @@ export async function runPluginOnResponseHook(args: {
         provider: args.provider,
         apiKeyInfo: args.apiKeyInfo,
         headers: args.headers,
+        ...(args.connectionId ? { connectionId: args.connectionId } : {}),
         metadata: {},
       },
       args.response
@@ -68,6 +71,8 @@ export type PluginOnStreamCompletePayload = {
   };
   model?: string;
   provider?: string;
+  /** Homelab (ZAC-267): the connection that answered. */
+  connectionId?: string;
   errorCode?: string;
 };
 
@@ -85,6 +90,7 @@ export async function runPluginOnStreamCompleteHook(args: {
   errorCode?: string | null | undefined;
   startTime: number;
   requestId?: string;
+  connectionId?: string | null;
 }): Promise<void> {
   try {
     const { runOnStreamComplete } = await import("@/lib/plugins/hooks");
@@ -98,6 +104,7 @@ export async function runPluginOnStreamCompleteHook(args: {
       },
       model: args.model ?? undefined,
       provider: args.provider ?? undefined,
+      ...(args.connectionId ? { connectionId: args.connectionId } : {}),
       errorCode: args.errorCode ?? undefined,
     }).catch(() => {});
   } catch (_) {

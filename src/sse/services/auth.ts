@@ -176,6 +176,7 @@ import {
   applySessionAffinityPin,
   formatSessionKeyForLog,
   isForcedConnectionMissingFromPool,
+  strictForcedConnectionPool,
   resolveForcedConnectionForCredentialPool,
   resolveSessionAffinityTtlMs,
   selectSessionAffinityConnection,
@@ -1014,7 +1015,10 @@ export async function getProviderCredentials(
     // judge "does some account list the model" over the whole pool, not just the pinned account.
     const inventoryPoolConnections = connections;
     let explicitProbeKind: "probe" | "suppressed" | "skip" = "skip";
-    if (forcedConnectionId && !connections.some((c) => c.id === forcedConnectionId)) {
+    // Strict even once the retry loop has dropped the forced id (excluded after a failure):
+    // then there is no account, never a sibling.
+    const strictPin = options.strictForcedConnection === true;
+    if (!strictPin && forcedConnectionId && !connections.some((c) => c.id === forcedConnectionId)) {
       const pinnedRaw = await getCachedProviderConnectionById(forcedConnectionId);
       const pinnedRow = pinnedRaw ? toProviderConnection(pinnedRaw) : null;
       const nowMs = Date.now();
@@ -1056,7 +1060,7 @@ export async function getProviderCredentials(
       affinityStore.driver === "redis" && options.sessionKey && sessionAffinityTtlMs > 0
         ? await affinityStore.get(options.sessionKey, provider, sessionAffinityTtlMs)
         : undefined;
-    if (!options.lease) {
+    if (!options.lease && !strictPin) {
       forcedConnectionId =
         applySessionAffinityPin({
           affinityRecord,
@@ -1075,7 +1079,29 @@ export async function getProviderCredentials(
     }
 
     // Forced ids absent from the pool fail; excluded/cooling/quota-blocked ids allow fallback.
-    if (isForcedConnectionMissingFromPool(forcedConnectionId, excludedConnectionIds, connections)) {
+    if (strictPin) {
+      connections = strictForcedConnectionPool({
+        forcedConnectionId,
+        excludedConnectionIds,
+        connections,
+        allowRateLimitedConnections,
+        bypassQuotaPolicy,
+        isQuotaExhausted: (connectionId) => {
+          const conn = connections.find((candidate) => candidate.id === connectionId);
+          return isQuotaExhaustedForRequest(
+            connectionId,
+            provider,
+            requestedModel,
+            conn?.providerSpecificData
+          );
+        },
+        isQuotaPolicyBlocked: (connection) =>
+          evaluateQuotaLimitPolicy(provider, connection as ProviderConnectionView, requestedModel)
+            .blocked,
+      });
+    } else if (
+      isForcedConnectionMissingFromPool(forcedConnectionId, excludedConnectionIds, connections)
+    ) {
       // Route through the existing "target has no eligible credentials" recoverable path
       // (the connections.length === 0 branch just below) instead of falling through to the
       // full active pool. That path already returns null/CONNECTION_INELIGIBLE, which the

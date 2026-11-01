@@ -656,6 +656,7 @@ export async function runStreamingTail(deps: StreamingTailDeps) {
       errorCode: streamErrorCode,
       startTime,
       requestId: traceId,
+      connectionId: streamConnectionId || connectionId || null,
     });
   };
 
@@ -854,6 +855,7 @@ export async function runStreamingTail(deps: StreamingTailDeps) {
     provider,
     apiKeyInfo,
     headers: clientRawRequest?.headers,
+    connectionId: getCurrentConnectionId() || connectionId || null,
     response: { status: 200, streamed: true },
   });
 

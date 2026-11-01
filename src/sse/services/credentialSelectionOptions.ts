@@ -14,6 +14,11 @@ export interface CredentialSelectionOptions {
   preferredConnectionIds?: string[] | null;
   /** The pin was chosen by the operator for this request (x-omniroute-connection), not derived by a combo. */
   explicitConnectionPin?: boolean;
+  /**
+   * Homelab (ZAC-267): keep-warm ping. The forced connection or none: no sibling
+   * fallback, no session-affinity override, no reviving an inactive connection.
+   */
+  strictForcedConnection?: boolean;
   excludeConnectionIds?: string[] | null;
   sessionKey?: string | null;
   sessionAffinityTtlMs?: number | null;

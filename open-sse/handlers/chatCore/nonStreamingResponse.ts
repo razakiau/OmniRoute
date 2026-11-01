@@ -1100,6 +1100,7 @@ export async function runNonStreamingResponse(deps: NonStreamingDeps) {
       provider,
       apiKeyInfo,
       headers: clientRawRequest?.headers,
+      connectionId: String(getCurrentConnectionId() || connectionId || "") || null,
       response: { status: 200, data: translatedResponse },
     });
 

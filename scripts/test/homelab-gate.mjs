@@ -32,6 +32,10 @@ const suites = [
   "chatcore-plugin-onrequest",
   "plugins-api-routes",
   "pricing-fallback",
+  "chatcore-plugin-onresponse",
+  "forced-connection-fallback",
+  "keepwarm-pinned-ping",
+  "keepwarm-pinned-ping-routing",
 ];
 const result = spawnSync(
   process.execPath,
