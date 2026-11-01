@@ -16,6 +16,11 @@ import xxhashInit from "xxhash-wasm";
 
 const CCH_SEED = 0x6e52736ac806831en;
 const CCH_PATTERN = /\bcch=([0-9a-f]{5});/;
+// ZAC-263: sign only the billing line's placeholder. The first "cch=xxxxx;" in the body
+// can be text quoted in the chat history (a tool result showing OmniRoute source); it
+// was rewritten with a new hash on every call, which broke the prompt cache at that
+// message on every call and left the billing line unsigned.
+const BILLING_PLACEHOLDER = /("text":"x-anthropic-billing-header:[^"\\]*?\bcch=)00000;/;
 
 let xxhashPromise: Promise<void> | null = null;
 let xxhash64Fn: ((input: Uint8Array, seed: bigint) => bigint) | null = null;
@@ -39,11 +44,11 @@ export async function computeCCH(bodyBytes: Uint8Array): Promise<string> {
 }
 
 export async function signRequestBody(bodyString: string): Promise<string> {
-  if (!CCH_PATTERN.test(bodyString)) return bodyString;
+  if (!BILLING_PLACEHOLDER.test(bodyString)) return bodyString;
   const encoder = new TextEncoder();
   const bodyBytes = encoder.encode(bodyString);
   const token = await computeCCH(bodyBytes);
-  return bodyString.replace(CCH_PATTERN, `cch=${token};`);
+  return bodyString.replace(BILLING_PLACEHOLDER, `$1${token};`);
 }
 
 export { CCH_PATTERN };
