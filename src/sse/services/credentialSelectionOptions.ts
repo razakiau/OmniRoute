@@ -20,6 +20,12 @@ export interface CredentialSelectionOptions {
    */
   strictForcedConnection?: boolean;
   excludeConnectionIds?: string[] | null;
+  /**
+   * Homelab (ZAC-263): ordered account tiers (claudeRoleTiers). Selection keeps
+   * the first tier that still has an available account; the occupancy spill
+   * never crosses tiers.
+   */
+  connectionTiers?: string[][] | null;
   sessionKey?: string | null;
   sessionAffinityTtlMs?: number | null;
   reserveOAuthSession?: boolean;

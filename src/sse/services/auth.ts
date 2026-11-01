@@ -183,6 +183,7 @@ import {
   planSessionAffinityConnection,
   syncSessionAffinityRuntimeFields,
 } from "./sessionAffinityPin";
+import { narrowToFirstTier } from "./claudeRoleTiers.ts";
 import {
   EXPLICIT_INACTIVE_PROBE_INTERVAL_MS,
   lastExplicitProbeTime,
@@ -1740,9 +1741,14 @@ export async function getProviderCredentials(
     }
 
     const subscriptionFirst = holdBackCodexCreditOnlyAccounts(provider, withQuota, requestedModel);
+    // ZAC-263: main chats and sub-agents each stay on their own account tier.
+    const tieredCandidates =
+      options.connectionTiers && options.connectionTiers.length > 0
+        ? narrowToFirstTier(subscriptionFirst, options.connectionTiers)
+        : subscriptionFirst;
     const policyValidLeaseCandidates = options._leaseCandidateIds
-      ? subscriptionFirst.filter((candidate) => options._leaseCandidateIds!.includes(candidate.id))
-      : subscriptionFirst;
+      ? tieredCandidates.filter((candidate) => options._leaseCandidateIds!.includes(candidate.id))
+      : tieredCandidates;
     if (policyValidLeaseCandidates.length === 0) return null;
     const leasePolicy = await applyExclusiveConnectionLeasePolicy(
       policyValidLeaseCandidates,
@@ -2002,10 +2008,13 @@ export async function getProviderCredentials(
       connection = orderedConnections[0];
     }
 
+    // ZAC-263: with tiers the spill would move a chat to a less busy account and
+    // rewrite its whole cache there; the tier already decided the account set.
     if (
       options.reserveOAuthSession === true &&
       connection?.authType === "oauth" &&
-      !selectedByApiKeyPreference
+      !selectedByApiKeyPreference &&
+      !(options.connectionTiers && options.connectionTiers.length > 0)
     ) {
       const selectedPriority = connection.priority || 999;
       const selectedAvailability = getOAuthSessionAvailability(connection.id, options.sessionKey);
