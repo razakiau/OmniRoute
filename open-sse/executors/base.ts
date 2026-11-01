@@ -55,6 +55,7 @@ import {
 import type { ProviderRequestDefaults } from "../services/providerRequestDefaults.ts";
 import { signRequestBody } from "../services/claudeCodeCCH.ts";
 import { normalizeCacheControlTtl } from "../services/claudeCodeConstraints.ts";
+import { placeStablePrefixBreakpoints } from "../services/claudeStablePrefix.ts";
 import {
   appendAnthropicBetaHeader,
   CLAUDE_CODE_COMPATIBLE_REDACT_THINKING_BETA,
@@ -1232,6 +1233,10 @@ export class BaseExecutor {
               );
             }
           }
+
+          // ZAC-263 (homelab): breakpoints before the client's cwd and session lines, so a
+          // new chat reads the shared prompt start back. Last thing to touch markers.
+          placeStablePrefixBreakpoints(tb);
 
           if (!tb.metadata || typeof tb.metadata !== "object") tb.metadata = {};
           (tb.metadata as Record<string, unknown>).user_id = buildUserIdJson({
