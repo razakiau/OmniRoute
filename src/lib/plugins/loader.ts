@@ -55,12 +55,59 @@ export interface LoadedPlugin {
   manifest: PluginManifestWithDefaults;
   plugin: Plugin;
   cleanup: () => void;
+  /** false once the child process has exited. */
+  isAlive?: () => boolean;
+}
+
+export interface PluginExitInfo {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  /** true when cleanup() asked for the exit (deactivate/uninstall). */
+  expected: boolean;
 }
 
 export interface LoadPluginOptions {
   /** Per-call IPC hook timeout in ms. Defaults to DEFAULT_HOOK_TIMEOUT (10s); injectable
    *  so tests can exercise the timeout paths without waiting out the production value. */
   hookTimeoutMs?: number;
+  /** Called once when the child process exits, after pending calls were rejected.
+   *  The manager uses it to unregister the dead plugin's hooks and respawn it (ZAC-283). */
+  onExit?: (info: PluginExitInfo) => void;
+}
+
+// ── Main-process stall accounting (ZAC-283) ──
+// On 2026-11-02 the OmniRoute main process froze ~10 s. While frozen it can neither
+// flush a large child.send() (a multi-MB request body only partly fits the pipe) nor
+// read the child's reply, yet the hook timer kept counting; when the loop woke, the
+// timers phase fired before the poll phase and SIGTERMed a healthy child. A heartbeat
+// measures how long the loop was stalled so the hook deadline is extended by that much:
+// the timeout then only counts time the child actually had to answer.
+const HEARTBEAT_MS = 200;
+const STALL_THRESHOLD_MS = 1_000;
+const MAX_STALL_EXTENSIONS = 3;
+let lastBeat = Date.now();
+let stalledMsTotal = 0;
+let heartbeat: ReturnType<typeof setInterval> | null = null;
+
+function beat(): void {
+  const now = Date.now();
+  const gap = now - lastBeat;
+  if (gap > STALL_THRESHOLD_MS) stalledMsTotal += gap - HEARTBEAT_MS;
+  lastBeat = now;
+}
+
+function ensureHeartbeat(): void {
+  if (heartbeat) return;
+  lastBeat = Date.now();
+  heartbeat = setInterval(beat, HEARTBEAT_MS);
+  heartbeat.unref?.();
+}
+
+/** Stalled ms so far, including a stall the heartbeat has not observed yet (it may run
+ *  after the hook timer in the same timers phase). */
+function stalledNow(): number {
+  const pending = Date.now() - lastBeat;
+  return stalledMsTotal + (pending > STALL_THRESHOLD_MS ? pending - HEARTBEAT_MS : 0);
 }
 
 /**
@@ -293,22 +340,68 @@ export async function loadPlugin(
     log.error("loader.process_error", { name: manifest.name, error: err.message });
   });
 
-  child.on("exit", (code) => {
-    log.info("loader.process_exit", { name: manifest.name, code });
+  let exited = false;
+  let cleanupRequested = false;
+
+  child.on("exit", (code, signal) => {
+    exited = true;
+    log.info("loader.process_exit", { name: manifest.name, code, signal });
     for (const [, pending] of pendingCalls) {
       clearTimeout(pending.timer);
       pending.reject(new Error(`Plugin process exited with code ${code}`));
     }
     pendingCalls.clear();
     removeHostScript(hostScriptPath);
+    try {
+      options.onExit?.({ code, signal, expected: cleanupRequested });
+    } catch (err: unknown) {
+      log.error("loader.on_exit_error", {
+        name: manifest.name,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   });
+
+  ensureHeartbeat();
 
   // Call a hook in the child process with a timeout. Blocking/lifecycle hooks escalate
   // SIGTERM → SIGKILL on timeout; NOTIFICATION_HOOKS only drop the pending call.
   const callHook = (hook: string, payload: unknown, timeout = hookTimeoutMs): Promise<unknown> => {
     return new Promise((resolve, reject) => {
+      // ZAC-283: a dead child used to make every call wait out the full timeout
+      // ("Channel closed" on send, then 10 s per hook per request). Fail at once.
+      if (exited || !child.connected) {
+        reject(new Error(`Plugin '${manifest.name}' process is not running`));
+        return;
+      }
       const id = String(++callCounter);
-      const timer = setTimeout(() => {
+      let stallBase = stalledNow();
+      let extensions = 0;
+
+      const onTimeout = () => {
+        // Let the poll phase deliver a reply that is already sitting in the IPC pipe:
+        // after a main-process freeze the timers phase runs before the socket is read.
+        setImmediate(() => {
+          const entry = pendingCalls.get(id);
+          if (!entry) return; // the reply (or the exit) settled it first
+          const stalled = stalledNow() - stallBase;
+          if (stalled > STALL_THRESHOLD_MS && extensions < MAX_STALL_EXTENSIONS) {
+            // The main process, not the plugin, used up this much of the deadline.
+            extensions++;
+            stallBase = stalledNow();
+            log.warn("plugin.hook_timeout_extended_after_stall", {
+              name: manifest.name,
+              hook,
+              stalledMs: stalled,
+            });
+            entry.timer = setTimeout(onTimeout, Math.min(stalled, timeout));
+            return;
+          }
+          expire();
+        });
+      };
+
+      const expire = () => {
         pendingCalls.delete(id);
         if (NOTIFICATION_HOOKS.has(hook)) {
           // Fire-and-forget notification: drop this delivery, keep the process. A late
@@ -327,10 +420,18 @@ export async function loadPlugin(
         // Escalate to SIGKILL if plugin ignores SIGTERM
         escalateToSigkill(child);
         reject(new Error(`Plugin hook '${hook}' timed out after ${timeout}ms`));
-      }, timeout);
+      };
 
-      pendingCalls.set(id, { resolve, reject, timer });
-      child.send({ type: "call", id, hook, payload });
+      pendingCalls.set(id, { resolve, reject, timer: setTimeout(onTimeout, timeout) });
+      child.send({ type: "call", id, hook, payload }, (err) => {
+        if (!err) return;
+        // "Channel closed" and friends: the call can never be answered, so settle it now.
+        const entry = pendingCalls.get(id);
+        if (!entry) return;
+        clearTimeout(entry.timer);
+        pendingCalls.delete(id);
+        entry.reject(new Error(`Plugin '${manifest.name}' IPC send failed: ${err.message}`));
+      });
     });
   };
 
@@ -424,6 +525,7 @@ export async function loadPlugin(
   });
 
   const cleanup = () => {
+    cleanupRequested = true;
     child.kill("SIGTERM");
     // Escalate to SIGKILL after grace period
     escalateToSigkill(child);
@@ -431,7 +533,13 @@ export async function loadPlugin(
     log.info("loader.cleanup", { name: manifest.name });
   };
 
-  return { name: manifest.name, manifest, plugin, cleanup };
+  return {
+    name: manifest.name,
+    manifest,
+    plugin,
+    cleanup,
+    isAlive: () => !exited && child.connected,
+  };
 }
 
 /**

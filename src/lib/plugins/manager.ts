@@ -104,9 +104,77 @@ function assertEntryPointWithinDest(destDir: string, entryPoint: string): void {
   }
 }
 
+// ZAC-283: a plugin child that dies on its own (hook-timeout kill, crash, OOM) used to
+// stay registered: every request then sent into a closed channel and waited out the
+// 10 s hook timeout, per hook, until someone ran deactivate + activate by hand. Now its
+// hooks are dropped at once and it is respawned, with backoff, a bounded number of
+// times per window; past that it is marked "error" so the UI tells the truth.
+const RESPAWN_DELAYS_MS = [1_000, 5_000, 30_000];
+const RESPAWN_WINDOW_MS = 10 * 60_000;
+const RESPAWN_MAX_IN_WINDOW = 5;
+
 class PluginManager {
   private static instance: PluginManager;
   private loadedPlugins: Map<string, LoadedPlugin> = new Map();
+  private respawns: Map<string, number[]> = new Map();
+  private respawnTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+  /** Overridable in tests. */
+  respawnDelaysMs: number[] = RESPAWN_DELAYS_MS;
+
+  private handleUnexpectedExit(
+    name: string,
+    loaded: LoadedPlugin | null,
+    info: { code: number | null; signal: NodeJS.Signals | null }
+  ): void {
+    // Only act for the child currently serving this plugin; a stale one changes nothing.
+    if (loaded && this.loadedPlugins.get(name) !== loaded) return;
+    unregisterHooks(name);
+    this.loadedPlugins.delete(name);
+
+    const now = Date.now();
+    const recent = (this.respawns.get(name) ?? []).filter((t) => now - t < RESPAWN_WINDOW_MS);
+    if (recent.length >= RESPAWN_MAX_IN_WINDOW) {
+      const msg = `plugin process died ${recent.length} times in ${RESPAWN_WINDOW_MS / 60_000} min (last: code ${info.code}, signal ${info.signal}); not respawning`;
+      updatePluginStatus(name, "error", msg);
+      log.error("manager.respawn_gave_up", { name, code: info.code, signal: info.signal });
+      return;
+    }
+    recent.push(now);
+    this.respawns.set(name, recent);
+    const delays = this.respawnDelaysMs;
+    const delay = delays[Math.min(recent.length - 1, delays.length - 1)];
+    log.warn("manager.respawn_scheduled", {
+      name,
+      code: info.code,
+      signal: info.signal,
+      delayMs: delay,
+      attempt: recent.length,
+    });
+    clearTimeout(this.respawnTimers.get(name));
+    const timer = setTimeout(() => {
+      this.respawnTimers.delete(name);
+      const row = getPluginByName(name);
+      // Deactivated or uninstalled meanwhile, or already back: nothing to do.
+      if (!row || row.status !== "active") return;
+      const current = this.loadedPlugins.get(name);
+      if (current && current.isAlive?.() !== false) return;
+      if (current) {
+        // Died while activate() was still registering it (exit before `self` was set).
+        unregisterHooks(name);
+        this.loadedPlugins.delete(name);
+      }
+      this.activate(name)
+        .then(() => log.info("manager.respawned", { name }))
+        .catch((err: unknown) =>
+          log.error("manager.respawn_failed", {
+            name,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        );
+    }, delay);
+    timer.unref?.();
+    this.respawnTimers.set(name, timer);
+  }
   private pluginDir: string;
 
   private constructor() {
@@ -436,7 +504,15 @@ class PluginManager {
     // every plugin already marked active — including the loadAll() boot path, whose
     // whole job is reloading exactly those. Hooks being fail-open, the plugin then
     // silently enforces nothing while the UI still reports it as active.
-    if (row.status === "active" && this.loadedPlugins.has(name)) return;
+    const existing = this.loadedPlugins.get(name);
+    if (row.status === "active" && existing && existing.isAlive?.() !== false) return;
+    if (existing) {
+      // ZAC-283: loaded but its process is gone — drop it and load a fresh one, so a
+      // plain activate repairs it (it used to need deactivate + activate).
+      unregisterHooks(name);
+      existing.cleanup();
+      this.loadedPlugins.delete(name);
+    }
 
     // Prefer a fresh read of plugin.json over the install-time DB snapshot so hook
     // fields added by newer schema versions reach pre-existing installs (#11934).
@@ -459,7 +535,14 @@ class PluginManager {
     }
 
     try {
-      const loaded = await loadPlugin(entryPoint, manifest);
+      let self: LoadedPlugin | null = null;
+      const loaded = await loadPlugin(entryPoint, manifest, {
+        onExit: (info) => {
+          if (info.expected) return;
+          this.handleUnexpectedExit(name, self, info);
+        },
+      });
+      self = loaded;
 
       const hookNames: LifecycleHookName[] = [
         "onRequest",
@@ -517,6 +600,9 @@ class PluginManager {
       loaded.cleanup();
       this.loadedPlugins.delete(name);
     }
+    clearTimeout(this.respawnTimers.get(name));
+    this.respawnTimers.delete(name);
+    this.respawns.delete(name);
 
     updatePluginStatus(name, "inactive");
 
