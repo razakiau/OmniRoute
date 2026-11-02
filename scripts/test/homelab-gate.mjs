@@ -36,6 +36,9 @@ const suites = [
   "forced-connection-fallback",
   "keepwarm-pinned-ping",
   "keepwarm-pinned-ping-routing",
+  "plugins-child-exit-zac283",
+  "plugins-onstreamcomplete-timeout-isolation",
+  "plugins-manager-restart-reload-7806",
 ];
 const result = spawnSync(
   process.execPath,
