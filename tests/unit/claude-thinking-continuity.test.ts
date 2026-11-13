@@ -221,16 +221,24 @@ test("Chat client: signed thinking from the Claude stream is restored before the
 test("ZAC-193: signed-thinking replay OFF by default falls back to the #5312 placeholder", () => {
   // The homelab regression: a gateway restart wipes the memory-only store, so replaying
   // signed blocks 400s "thinking blocks cannot be modified". Default-off makes the request
-  // path restart-immune by emitting the signature-less redacted_thinking placeholder instead.
+  // path restart-immune: the stored signed block is never replayed. Since v3.8.53 upstream
+  // no longer injects the #5312 placeholder either ("never fabricate a signature"; a store
+  // miss injects nothing), so the turn starts with the tool_use itself.
   streamClaudeToChat(claudeToolTurnEvents());
   delete process.env.OMNIROUTE_CLAUDE_SIGNED_THINKING_REPLAY; // override beforeEach's opt-in
 
   const turn = assistantTurn(translateChatTurn(chatHistory()));
 
-  assert.deepEqual(
-    stripCacheControl(turn.content[0]),
-    { type: "redacted_thinking", data: DEFAULT_THINKING_CLAUDE_SIGNATURE },
-    "default-off emits the #5312 placeholder, not the stored signed block"
+  assert.equal(
+    turn.content.some((block) => block.type === "thinking" || block.type === "redacted_thinking"),
+    false,
+    "default-off replays no thinking block at all (no signed block, no fabricated placeholder)"
+  );
+  assert.equal(
+    turn.content.some(
+      (block) => block.type === "redacted_thinking" && block.data === DEFAULT_THINKING_CLAUDE_SIGNATURE
+    ),
+    false
   );
   assert.equal(
     turn.content.some(

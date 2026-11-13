@@ -16,7 +16,6 @@ import { getModelPricing } from "../../open-sse/services/providerCostData.ts";
 import { getStaticModelsForProvider } from "../../src/lib/providers/staticModels.ts";
 import { getDefaultPricing } from "../../src/shared/constants/pricing.ts";
 import { calculateCostDetailed } from "../../src/lib/usage/costCalculator.ts";
-import { estimateApiEquivalentCacheWrite } from "../../src/lib/usage/cacheWriteEstimate.ts";
 import {
   getModelSpec,
   normalizeForcedToolChoiceForModel,
@@ -168,14 +167,9 @@ test("Claude Fable 5.2 is priced by the usage calculator, not recorded as unpric
   }
 });
 
-test("Claude Fable 5.2 diagnostic cache-write estimates include the official 1-hour rate", () => {
-  const estimate = estimateApiEquivalentCacheWrite(
-    getDefaultPricing().anthropic[MODEL_ID],
-    { fiveMinute: 0, oneHour: 1_000_000, total: 1_000_000, unknown: 0, status: "reported" },
-    { provider: "anthropic", model: MODEL_ID }
-  );
-  assert.equal(estimate.knownTierCostUsd, 16);
-});
+// Homelab (ZAC-325): the PR's "diagnostic cache-write estimates include the official
+// 1-hour rate" case is dropped here: it imports src/lib/usage/cacheWriteEstimate.ts, which
+// arrived with upstream #17307 (cache-write tiers, migration 230) after v3.8.53.
 
 test("Claude Fable 5.2 pricing matches Anthropic's published rates", () => {
   for (const providerId of ["anthropic", "cc"] as const) {
