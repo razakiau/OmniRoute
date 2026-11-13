@@ -1,15 +1,15 @@
-name: Homelab 3.8.52 image
+name: Homelab 3.8.53 image
 
 on:
   push:
-    branches: [zack/zac-193-omniroute-3.8.52]
+    branches: [zack/zac-325-omniroute-3.8.53-fable-5-2]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: homelab-3852-${{ github.ref }}
+  group: homelab-3853-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -55,10 +55,10 @@ jobs:
           # changed (cache-cold webpack pass); the runner has 16 GB.
           build-args: |
             OMNIROUTE_BUILD_MEMORY_MB=10240
-          tags: ghcr.io/razakiau/omniroute:3.8.52-homelab-${{ github.sha }}
+          tags: ghcr.io/razakiau/omniroute:3.8.53-homelab-${{ github.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/razakiau/OmniRoute
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=3.8.52-homelab
-          cache-from: type=gha,scope=homelab-3852
-          cache-to: type=gha,mode=max,scope=homelab-3852
+            org.opencontainers.image.version=3.8.53-homelab
+          cache-from: type=gha,scope=homelab-3853
+          cache-to: type=gha,mode=max,scope=homelab-3853

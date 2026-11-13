@@ -1,4 +1,4 @@
-// Focused release gate for the homelab build of release/v3.8.52 (ZAC-193):
+// Focused release gate for the homelab build of v3.8.53 (ZAC-325; was release/v3.8.52, ZAC-193):
 // the Claude 5.5 models we route, the fixes our old plugins and backport
 // carried, the refresh-hang fix, and the admission/timeout knobs we tune.
 import { spawnSync } from "node:child_process";
